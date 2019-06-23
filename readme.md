@@ -96,3 +96,50 @@ function App() {
 
 render(<App />, document.getElementById("root"));
 ```
+
+## Using AsyncRender component
+
+AsyncRender component receives specified async state (or multiple states).
+When state loaded, render callback/component will be called
+unless AsyncRender's children will be rendered instead
+
+```jsx harmony
+import React from "react";
+import { render } from "react-dom";
+import { createState, createAction, useStates, AsyncRender } from "./hookex";
+
+const apiUrl = "https://api.github.com/users/";
+const $SearchTerm = createState("");
+const UpdateSearchTerm = createAction([$SearchTerm], (searchTerm, value) =>
+  searchTerm(value)
+);
+const $UserInfo = createState([$SearchTerm], async searchTerm => {
+  const res = await fetch(apiUrl + searchTerm);
+  return await res.json();
+});
+
+function UserInfo({ data }) {
+  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+}
+
+function App() {
+  const [searchTerm] = useStates($SearchTerm);
+
+  return (
+    <div>
+      <p>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={e => UpdateSearchTerm(e.target.value)}
+        />
+      </p>
+      <AsyncRender render={UserInfo} state={$UserInfo}>
+        Loading...
+      </AsyncRender>
+    </div>
+  );
+}
+
+render(<App />, document.getElementById("root"));
+```
