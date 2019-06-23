@@ -1,7 +1,14 @@
 import { useEffect, useState, createElement, memo, useRef } from "react";
 
+const defaultDebounce = 300;
 let scopes = 0;
 
+/**
+ * createState(defaultValue:any)
+ * createState(dependencies:IState[], functor:Function, options:any)
+ * @param args
+ * @return {{async: boolean, computed: boolean, subscribers: Set<any>, value: *, done: boolean}|{async: boolean, computed: boolean, subscribers: Set<any>, value: undefined, done: boolean}}
+ */
 export function createState(...args) {
   // create simple state
   if (args.length === 1) {
@@ -17,7 +24,7 @@ export function createState(...args) {
   const [
     dependencies,
     loader,
-    { sync, defaultValue = undefined, debounce = 300 } = {}
+    { sync, defaultValue = undefined, debounce = defaultDebounce } = {}
   ] = args;
   const subscribers = new Set();
   let keys = [];
@@ -125,6 +132,12 @@ export function createState(...args) {
   return state;
 }
 
+/**
+ * create an action which depend on specified states
+ * @param IState[]  states
+ * @param Function  functor
+ * @return {(Function & {getStates(): *, setStates(*): void})|*}
+ */
 export function createAction(states, functor) {
   let accessors = createAccessors(states);
 
@@ -239,6 +252,12 @@ export function useStates(...states) {
   return values;
 }
 
+/**
+ *
+ * @param stateMap
+ * @param fallbackOrOptions
+ * @return {function(*=): Function}
+ */
 export function withAsyncStates(stateMap, fallbackOrOptions) {
   if (
     typeof fallbackOrOptions === "function" ||
@@ -253,6 +272,10 @@ export function withAsyncStates(stateMap, fallbackOrOptions) {
 
   const entries = Object.entries(stateMap || {});
   const states = entries.map(x => x[1]);
+
+  if (states.some(state => !state.async)) {
+    throw new Error("Expect async state but got sync state");
+  }
 
   return comp => {
     const memoizedComp = memo(comp);
@@ -327,6 +350,11 @@ export function mock(actionMockings, functor) {
   }
 }
 
+/**
+ * load multiple states from specific data
+ * @param states
+ * @param data
+ */
 export function loadStates(states, data = {}) {
   Object.keys(states).forEach(key => {
     const state = states[key];
@@ -337,6 +365,10 @@ export function loadStates(states, data = {}) {
   });
 }
 
+/**
+ * export multiple states to json object
+ * @param states
+ */
 export function exportStateValues(states) {
   const values = {};
 
@@ -347,7 +379,14 @@ export function exportStateValues(states) {
   return values;
 }
 
-export function persist(states, data, onChange, debounce = 0) {
+/**
+ * perfom loading/saving multiple states automatically
+ * @param states
+ * @param data
+ * @param onChange
+ * @param debounce
+ */
+export function persist(states, data, onChange, debounce = defaultDebounce) {
   loadStates(states, data);
   let timerId;
   function debouncedHandleChange() {
@@ -362,7 +401,7 @@ export function persist(states, data, onChange, debounce = 0) {
   function handleChange() {
     clearTimeout(timerId);
     const values = exportStateValues(states);
-    onChange(values);
+    onChange && onChange(values);
   }
 
   Object.values(states).forEach(state =>
