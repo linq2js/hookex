@@ -33,7 +33,9 @@ render(<App />, document.getElementById("root"));
 ```
 
 ## Dynamic State
+
 Create dynamic state which is computed from other states
+
 ```jsx harmony
 import React from "react";
 import { render } from "react-dom";
@@ -50,6 +52,44 @@ function App() {
       <p>Counter: {count}</p>
       <p>Double Counter: {doubleCount}</p>
       <button onClick={Increase}>Click to increase counter</button>
+    </div>
+  );
+}
+
+render(<App />, document.getElementById("root"));
+```
+
+## Async State
+
+Search github user
+
+```jsx harmony
+import React from "react";
+import { render } from "react-dom";
+import { createState, createAction, useStates } from "hookex";
+
+const apiUrl = "https://api.github.com/users/";
+const $SearchTerm = createState("");
+const UpdateSearchTerm = createAction([$SearchTerm], (searchTerm, value) =>
+  searchTerm(value)
+);
+// once searchTerm changed, UserInfo state will be recomputed
+const $UserInfo = createState([$SearchTerm], async searchTerm => {
+  const res = await fetch(apiUrl + searchTerm);
+  return await res.json();
+});
+
+function App() {
+  const [searchTerm, userInfo] = useStates($SearchTerm, $UserInfo);
+  const { value, done } = userInfo;
+  return (
+    <div>
+      <input
+        type="text"
+        value={searchTerm}
+        onChange={e => UpdateSearchTerm(e.target.value)}
+      />
+      <pre>{done ? JSON.stringify(value, null, 2) : "Searching..."}</pre>
     </div>
   );
 }
