@@ -5,6 +5,7 @@
   "compilerOptions": {
     "lib": [
       "dom",
+      "dom.iterable",
       "es2017"
     ],
     "downlevelIteration": true,
