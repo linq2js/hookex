@@ -1,0 +1,37 @@
+{
+  "name": "hookex",
+  "version": "1.0.0",
+  "description": "A simple state manager for React",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linq2js/hookex.git"
+  },
+  "keywords": [
+    "react",
+    "redux",
+    "state",
+    "management",
+    "state",
+    "manager",
+    "state",
+    "flux"
+  ],
+  "author": "linq2js",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/linq2js/hookex/issues"
+  },
+  "homepage": "https://github.com/linq2js/hookex#readme",
+  "dependencies": {
+    "react": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^16.8.22",
+    "typescript": "^3.3.3",
+    "prettier": "^1.18.2"
+  }
+}
