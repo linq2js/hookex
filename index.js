@@ -21,6 +21,7 @@ export function createState(...args) {
     };
   }
 
+  // create computed state
   const [
     dependencies,
     loader,
@@ -238,14 +239,15 @@ export function useStates(...states) {
   useEffect(() => {
     // do not rerender if component is unmount
     const handleChange = () => !unmountRef.current && forceRerencer({});
-    const unsubscribes = statesRef.current.map(state => {
-      state.subscribers.add(handleChange);
 
-      return () => state.subscribers.delete(handleChange);
+    statesRef.current.map(state => {
+      state.subscribers.add(handleChange);
     });
 
     return () => {
-      unsubscribes.forEach(unsubscribe => unsubscribe());
+      statesRef.current.forEach(state =>
+        state.subscribers.delete(handleChange)
+      );
     };
   }, [forceRerencer]);
 
