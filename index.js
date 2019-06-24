@@ -10,15 +10,36 @@ let scopes = 0;
  * @return {{async: boolean, computed: boolean, subscribers: Set<any>, value: *, done: boolean}|{async: boolean, computed: boolean, subscribers: Set<any>, value: undefined, done: boolean}}
  */
 export function createState(...args) {
+  const subscribers = new Set();
+
+  function notity() {
+    for (const subscriber of subscribers) {
+      subscriber();
+    }
+  }
+
   // create simple state
   if (args.length === 1) {
-    return {
-      value: args[0],
-      done: true,
-      subscribers: new Set(),
-      async: false,
-      computed: false
-    };
+    const simpleState = Object.assign(
+      callback => {
+        const newValue = callback(simpleState.value);
+        if (newValue && newValue.then) {
+          throw new Error("Do not use this method for async updating");
+        }
+        if (newValue !== simpleState.value) {
+          simpleState.value = newValue;
+          notity();
+        }
+      },
+      {
+        value: args[0],
+        done: true,
+        subscribers,
+        async: false,
+        computed: false
+      }
+    );
+    return simpleState;
   }
 
   // create computed state
@@ -27,18 +48,14 @@ export function createState(...args) {
     loader,
     { sync, defaultValue = undefined, debounce = defaultDebounce } = {}
   ] = args;
-  const subscribers = new Set();
+
   let keys = [];
   let timerId;
-  let noAsync = true;
   let allDone = dependencies.every(dependency => {
-    if (dependency.async) {
-      noAsync = false;
-    }
     dependency.subscribers.add(sync ? callLoaderSync : debouncedCallLoader);
     return dependency.done;
   });
-  const state = {
+  const computedState = {
     value: defaultValue,
     done: false,
     async: !sync,
@@ -50,16 +67,10 @@ export function createState(...args) {
   function debouncedCallLoader() {
     if (debounce) {
       clearTimeout(timerId);
-      currentLock = state.lock = {};
+      currentLock = computedState.lock = {};
       timerId = setTimeout(callLoaderAsync, debounce);
     } else {
       callLoaderAsync();
-    }
-  }
-
-  function notity() {
-    for (const subscriber of state.subscribers) {
-      subscriber();
     }
   }
 
@@ -79,11 +90,11 @@ export function createState(...args) {
 
   function callLoaderSync() {
     shouldUpdate(() => {
-      state.done = false;
-      const prevValue = state.value;
-      state.value = loader(...keys);
-      state.done = true;
-      if (state.value !== prevValue) {
+      computedState.done = false;
+      const prevValue = computedState.value;
+      computedState.value = loader(...keys);
+      computedState.done = true;
+      if (computedState.value !== prevValue) {
         notity();
       }
     });
@@ -91,14 +102,14 @@ export function createState(...args) {
 
   function callLoaderAsync() {
     clearTimeout(timerId);
-    if (currentLock !== state.lock) return;
+    if (currentLock !== computedState.lock) return;
     shouldUpdate(async () => {
-      const shouldNotity = state.done !== false || state.error;
+      const shouldNotity = computedState.done !== false || computedState.error;
 
-      state.done = false;
-      state.error = undefined;
+      computedState.done = false;
+      computedState.error = undefined;
 
-      const originalValue = state.value;
+      const originalValue = computedState.value;
 
       if (shouldNotity) {
         notity();
@@ -106,31 +117,31 @@ export function createState(...args) {
 
       try {
         const value = await loader(...keys);
-        if (currentLock !== state.lock) return;
-        state.value = value;
-        state.done = true;
+        if (currentLock !== computedState.lock) return;
+        computedState.value = value;
+        computedState.done = true;
       } catch (e) {
-        if (currentLock !== state.lock) return;
-        state.error = e;
-        state.done = true;
+        if (currentLock !== computedState.lock) return;
+        computedState.error = e;
+        computedState.done = true;
       }
 
       // dispatch change
-      if (state.value !== originalValue) {
+      if (computedState.value !== originalValue) {
         notity();
       }
     });
   }
 
   if (allDone) {
-    if (state.async) {
+    if (computedState.async) {
       callLoaderAsync();
     } else {
       callLoaderSync();
     }
   }
 
-  return state;
+  return computedState;
 }
 
 /**
@@ -149,10 +160,9 @@ export function createAction(states, functor) {
         function(value) {
           if (arguments.length) {
             if (state.computed) {
-              throw new Error("Cannot update async state");
+              throw new Error("Cannot update computed state");
             }
-            state.value = value;
-            return;
+            return (state.value = value);
           }
 
           return state.value;
@@ -239,15 +249,14 @@ export function useStates(...states) {
   useEffect(() => {
     // do not rerender if component is unmount
     const handleChange = () => !unmountRef.current && forceRerencer({});
+    const localStates = statesRef.current;
 
-    statesRef.current.map(state => {
+    localStates.forEach(state => {
       state.subscribers.add(handleChange);
     });
 
     return () => {
-      statesRef.current.forEach(state =>
-        state.subscribers.delete(handleChange)
-      );
+      localStates.forEach(state => state.subscribers.delete(handleChange));
     };
   }, [forceRerencer]);
 
@@ -359,9 +368,11 @@ export function mock(actionMockings, functor) {
  */
 export function loadStates(states, data = {}) {
   Object.keys(states).forEach(key => {
+    // do not overwrite state value if the key is not present in data
+    if (!(key in data)) return;
     const state = states[key];
     if (state.computed) {
-      throw new Error("Cannot update async state");
+      throw new Error("Cannot update computed state");
     }
     state.value = data[key];
   });

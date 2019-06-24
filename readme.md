@@ -1,7 +1,7 @@
-#hookex
+# hookex
 
 A state manager for React without reducer, Provider, dispatcher etc.
-Created for large projects
+Design for large projects which has thousand of components
 
 # Samples
 
@@ -142,4 +142,42 @@ function App() {
 }
 
 render(<App />, document.getElementById("root"));
+```
+
+## Saving and loading states with localStorage
+
+```jsx harmony
+import { createState, createAction, persist } from "hookex";
+
+const CounterState = createState(1);
+const Increase = createAction([CounterState], async counter =>
+  console.log(counter(counter() + 1))
+);
+
+setInterval(Increase, 3000);
+
+persist(
+  {
+    counter: CounterState
+  },
+  JSON.parse(localStorage.getItem("counterApp")) || {},
+  state => localStorage.setItem("counterApp", JSON.stringify(state))
+);
+```
+
+## Update single state
+
+```jsx harmony
+import { createState } from "hookex";
+
+const CounterState = createState(1);
+
+setInterval(
+  () =>
+    CounterState(prev => {
+      console.log(prev);
+      return prev + 1;
+    }),
+  3000
+);
 ```
