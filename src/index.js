@@ -1,7 +1,9 @@
 import { useEffect, useState, createElement, memo, useRef } from "react";
 
 const defaultDebounce = 300;
+const scopeUpdates = [];
 let scopes = 0;
+let setUniqueId = 1;
 
 /**
  * createState(defaultValue:any)
@@ -10,25 +12,38 @@ let scopes = 0;
  * @return {{async: boolean, computed: boolean, subscribers: Set<any>, value: *, done: boolean}|{async: boolean, computed: boolean, subscribers: Set<any>, value: undefined, done: boolean}}
  */
 export function createState(...args) {
-  const subscribers = new Set();
+  const subscribers = {};
 
-  function notity() {
-    for (const subscriber of subscribers) {
-      subscriber();
-    }
+  function unsubscribe(subscriber) {
+    removeFromSet(subscribers, subscriber);
+    return this;
+  }
+
+  function subscribe(subscriber) {
+    addToSet(subscribers, subscriber);
+    return this;
   }
 
   // create simple state
   if (args.length === 1) {
     const simpleState = Object.assign(
       callback => {
-        const newValue = callback(simpleState.value);
+        let newValue;
+        // is normal object
+        if (typeof callback !== "function") {
+          newValue =
+            // is synthetic event object
+            callback && callback.target ? callback.target.value : callback;
+        } else {
+          newValue = callback(simpleState.value);
+        }
+
         if (newValue && newValue.then) {
           throw new Error("Do not use this method for async updating");
         }
         if (newValue !== simpleState.value) {
           simpleState.value = newValue;
-          notity();
+          notify(subscribers);
         }
       },
       {
@@ -36,7 +51,9 @@ export function createState(...args) {
         done: true,
         subscribers,
         async: false,
-        computed: false
+        computed: false,
+        subscribe,
+        unsubscribe
       }
     );
     return simpleState;
@@ -52,15 +69,18 @@ export function createState(...args) {
   let keys = [];
   let timerId;
   let allDone = dependencies.every(dependency => {
-    dependency.subscribers.add(sync ? callLoaderSync : debouncedCallLoader);
+    dependency.subscribe(sync ? callLoaderSync : debouncedCallLoader);
     return dependency.done;
   });
   const computedState = {
+    dependencies,
     value: defaultValue,
     done: false,
     async: !sync,
     computed: true,
-    subscribers
+    subscribers,
+    subscribe,
+    unsubscribe
   };
   let currentLock;
 
@@ -95,7 +115,7 @@ export function createState(...args) {
       computedState.value = loader(...keys);
       computedState.done = true;
       if (computedState.value !== prevValue) {
-        notity();
+        notify(subscribers);
       }
     });
   }
@@ -112,7 +132,7 @@ export function createState(...args) {
       const originalValue = computedState.value;
 
       if (shouldNotity) {
-        notity();
+        notify(subscribers);
       }
 
       try {
@@ -128,7 +148,7 @@ export function createState(...args) {
 
       // dispatch change
       if (computedState.value !== originalValue) {
-        notity();
+        notify(subscribers);
       }
     });
   }
@@ -146,8 +166,8 @@ export function createState(...args) {
 
 /**
  * create an action which depend on specified states
- * @param IState[]  states
- * @param Function  functor
+ * @param {IState[]}  states
+ * @param {Function}  functor
  * @return {(Function & {getStates(): *, setStates(*): void})|*}
  */
 export function createAction(states, functor) {
@@ -180,20 +200,17 @@ export function createAction(states, functor) {
     });
   }
 
-  function performUpdate() {
-    const subscribers = new Set();
+  function performUpdate(subscribers = {}, batchUpdate = false) {
     // collect all subscribers
     for (const accessor of accessors) {
       if (accessor.hasChange()) {
-        for (const subscriber of accessor.state.subscribers) {
-          subscribers.add(subscriber);
-        }
+        Object.assign(subscribers, accessor.state.subscribers);
         accessor.resetOriginalValue();
       }
     }
 
-    for (const subscriber of subscribers) {
-      subscriber();
+    if (!batchUpdate) {
+      notify(subscribers);
     }
   }
 
@@ -201,6 +218,7 @@ export function createAction(states, functor) {
     (...args) => {
       try {
         scopes++;
+        scopeUpdates.push(performUpdate);
 
         const result = functor(...accessors, ...args);
 
@@ -212,8 +230,15 @@ export function createAction(states, functor) {
         return result;
       } finally {
         scopes--;
+
         if (!scopes) {
-          performUpdate();
+          // collect all subscribers need to be notified
+          const subscribers = {};
+          scopeUpdates
+            .splice(0, scopeUpdates.length)
+            .forEach(update => update(subscribers, true));
+
+          notify(subscribers);
         }
       }
     },
@@ -233,7 +258,7 @@ function getStateValues(states) {
 }
 
 export function useStates(...states) {
-  const [, forceRerencer] = useState();
+  const [, forceRerender] = useState();
   const unmountRef = useRef(false);
   const statesRef = useRef(states);
   const values = getStateValues(states);
@@ -248,17 +273,17 @@ export function useStates(...states) {
 
   useEffect(() => {
     // do not rerender if component is unmount
-    const handleChange = () => !unmountRef.current && forceRerencer({});
+    const handleChange = () => !unmountRef.current && forceRerender({});
     const localStates = statesRef.current;
 
     localStates.forEach(state => {
-      state.subscribers.add(handleChange);
+      state.subscribe(handleChange);
     });
 
     return () => {
-      localStates.forEach(state => state.subscribers.delete(handleChange));
+      localStates.forEach(state => state.unsubscribe(handleChange));
     };
-  }, [forceRerencer]);
+  }, [forceRerender]);
 
   return values;
 }
@@ -418,7 +443,7 @@ export function persist(states, data, onChange, debounce = defaultDebounce) {
   }
 
   Object.values(states).forEach(state =>
-    state.subscribers.add(debouncedHandleChange)
+    state.subscribe(debouncedHandleChange)
   );
 }
 
@@ -516,4 +541,28 @@ export function AsyncRender({
   }
 
   return data;
+}
+
+function addToSet(set, functor) {
+  if (!functor.__id__) {
+    functor.__id__ = setUniqueId++;
+  }
+
+  if (functor.__id__ in set) {
+    return;
+  }
+
+  set[functor.__id__] = functor;
+}
+
+function removeFromSet(set, functor) {
+  if (functor.__id__) {
+    delete set[functor.__id__];
+  }
+}
+
+function notify(subscribers) {
+  for (const subscriber of Object.values(subscribers)) {
+    subscriber();
+  }
 }

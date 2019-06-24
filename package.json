@@ -2,7 +2,7 @@
   "name": "hookex",
   "version": "0.0.12",
   "description": "A simple state manager for React",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "jest"
   },
@@ -30,9 +30,13 @@
     "react": "latest"
   },
   "devDependencies": {
+    "@babel/cli": "^7.4.4",
+    "@babel/core": "^7.4.5",
+    "@babel/preset-env": "^7.4.5",
     "@types/react": "^16.8.22",
-    "typescript": "^3.3.3",
+    "jest": "^24.8.0",
     "prettier": "^1.18.2",
-    "react-dom": "^16.8.6"
+    "react-dom": "^16.8.6",
+    "typescript": "^3.3.3"
   }
 }

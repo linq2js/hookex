@@ -167,6 +167,8 @@ persist(
 
 ## Update single state
 
+Note: Cannot update computed state
+
 ```jsx harmony
 import { createState } from "hookex";
 
@@ -180,4 +182,31 @@ setInterval(
     }),
   3000
 );
+```
+
+## Using State as event handler
+
+You can pass state to element event, it can process input synthetic event (event.target.value)
+
+```jsx harmony
+import React from "react";
+import { render } from "react-dom";
+import { createState, useStates } from "./hookex";
+
+const ValueState = createState("Hello world !!!");
+
+function App() {
+  const [value] = useStates(ValueState);
+
+  return (
+    <>
+      <p>
+        <input value={value} onChange={ValueState} />
+      </p>
+      {value}
+    </>
+  );
+}
+
+render(<App />, document.getElementById("root"));
 ```
