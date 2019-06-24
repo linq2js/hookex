@@ -33,7 +33,11 @@ export function createState(...args) {
         if (typeof callback !== "function") {
           newValue =
             // is synthetic event object
-            callback && callback.target ? callback.target.value : callback;
+            callback && callback.target
+              ? typeof callback.target.checked !== "undefined"
+                ? callback.target.checked // checkbox
+                : callback.target.value // other inputs
+              : callback;
         } else {
           newValue = callback(simpleState.value);
         }
@@ -387,31 +391,31 @@ export function mock(actionMockings, functor) {
 }
 
 /**
- * load multiple states from specific data
- * @param states
+ * update multiple states from specific data
+ * @param stateMap
  * @param data
  */
-export function loadStates(states, data = {}) {
-  Object.keys(states).forEach(key => {
+export function updateStates(stateMap, data = {}) {
+  Object.keys(stateMap).forEach(key => {
     // do not overwrite state value if the key is not present in data
     if (!(key in data)) return;
-    const state = states[key];
+    const state = stateMap[key];
     if (state.computed) {
       throw new Error("Cannot update computed state");
     }
-    state.value = data[key];
+    state(data[key]);
   });
 }
 
 /**
  * export multiple states to json object
- * @param states
+ * @param stateMap
  */
-export function exportStateValues(states) {
+export function exportStates(stateMap) {
   const values = {};
 
-  Object.keys(states).forEach(key => {
-    values[key] = states[key].value;
+  Object.keys(stateMap).forEach(key => {
+    values[key] = stateMap[key].value;
   });
 
   return values;
@@ -425,7 +429,7 @@ export function exportStateValues(states) {
  * @param debounce
  */
 export function persist(states, data, onChange, debounce = defaultDebounce) {
-  loadStates(states, data);
+  updateStates(states, data);
   let timerId;
   function debouncedHandleChange() {
     if (debounce) {
@@ -438,7 +442,7 @@ export function persist(states, data, onChange, debounce = defaultDebounce) {
 
   function handleChange() {
     clearTimeout(timerId);
-    const values = exportStateValues(states);
+    const values = exportStates(states);
     onChange && onChange(values);
   }
 

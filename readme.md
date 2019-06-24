@@ -12,15 +12,15 @@ import React from "react";
 import { render } from "react-dom";
 import { createState, createAction, useStates } from "hookex";
 
-// define $Count state with 1 as default value
-const $Count = createState(1);
-// define an action, specified $Count as dependencies
-// action body receives $Counter accessor
+// define CountState with 1 as default value
+const CountState = createState(1);
+// define an action, specified CountState as dependencies
+// action body receives CountState accessor
 // using count() to get current state value and count(newValue) to update state
-const Increase = createAction([$Count], count => count(count() + 1));
+const Increase = createAction([CountState], count => count(count() + 1));
 
 function App() {
-  const [count] = useStates($Count);
+  const [count] = useStates(CountState);
   return (
     <div>
       Counter: {count}
@@ -41,12 +41,12 @@ import React from "react";
 import { render } from "react-dom";
 import { createState, createAction, useStates } from "hookex";
 
-const $Count = createState(1);
-const Increase = createAction([$Count], count => count(count() + 1));
-const $DoubleCount = createState([$Count], count => count * 2, { sync: true });
+const CountState = createState(1);
+const DoubleCountState = createState([CountState], count => count * 2, { sync: true });
+const Increase = createAction([CountState], count => count(count() + 1));
 
 function App() {
-  const [count, doubleCount] = useStates($Count, $DoubleCount);
+  const [count, doubleCount] = useStates(CountState, DoubleCountState);
   return (
     <div>
       <p>Counter: {count}</p>
@@ -69,18 +69,18 @@ import { render } from "react-dom";
 import { createState, createAction, useStates } from "hookex";
 
 const apiUrl = "https://api.github.com/users/";
-const $SearchTerm = createState("");
-const UpdateSearchTerm = createAction([$SearchTerm], (searchTerm, value) =>
+const SearchTermState = createState("");
+const UpdateSearchTerm = createAction([SearchTermState], (searchTerm, value) =>
   searchTerm(value)
 );
 // once searchTerm changed, UserInfo state will be recomputed
-const $UserInfo = createState([$SearchTerm], async searchTerm => {
+const UserInfoState = createState([SearchTermState], async searchTerm => {
   const res = await fetch(apiUrl + searchTerm);
   return await res.json();
 });
 
 function App() {
-  const [searchTerm, userInfo] = useStates($SearchTerm, $UserInfo);
+  const [searchTerm, userInfo] = useStates(SearchTermState, UserInfoState);
   const { value, done } = userInfo;
   return (
     <div>
@@ -109,11 +109,11 @@ import { render } from "react-dom";
 import { createState, createAction, useStates, AsyncRender } from "./hookex";
 
 const apiUrl = "https://api.github.com/users/";
-const $SearchTerm = createState("");
-const UpdateSearchTerm = createAction([$SearchTerm], (searchTerm, value) =>
+const SearchTermState = createState("");
+const UpdateSearchTerm = createAction([SearchTermState], (searchTerm, value) =>
   searchTerm(value)
 );
-const $UserInfo = createState([$SearchTerm], async searchTerm => {
+const UserInfoState = createState([SearchTermState], async searchTerm => {
   const res = await fetch(apiUrl + searchTerm);
   return await res.json();
 });
@@ -123,7 +123,7 @@ function UserInfo({ data }) {
 }
 
 function App() {
-  const [searchTerm] = useStates($SearchTerm);
+  const [searchTerm] = useStates(SearchTermState);
 
   return (
     <div>
@@ -134,7 +134,7 @@ function App() {
           onChange={e => UpdateSearchTerm(e.target.value)}
         />
       </p>
-      <AsyncRender render={UserInfo} state={$UserInfo}>
+      <AsyncRender render={UserInfo} state={UserInfoState}>
         Loading...
       </AsyncRender>
     </div>
@@ -186,24 +186,29 @@ setInterval(
 
 ## Using State as event handler
 
-You can pass state to element event, it can process input synthetic event (event.target.value)
+You can pass state to element event, it can process input synthetic event (event.target.value/event.target.checked)
 
 ```jsx harmony
 import React from "react";
 import { render } from "react-dom";
-import { createState, useStates } from "./hookex";
+import { createState, useStates } from "hookex";
 
 const ValueState = createState("Hello world !!!");
+const CheckedState = createState(true);
 
 function App() {
-  const [value] = useStates(ValueState);
+  const [value, checked] = useStates(ValueState, CheckedState);
 
   return (
     <>
       <p>
         <input value={value} onChange={ValueState} />
       </p>
-      {value}
+      <p>{value}</p>
+      <p>
+        <input type="checkbox" checked={checked} onChange={CheckedState} />
+      </p>
+      <p>{checked ? "checked" : "unchecked"}</p>
     </>
   );
 }

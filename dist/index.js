@@ -8,8 +8,8 @@ exports.createAction = createAction;
 exports.useStates = useStates;
 exports.withAsyncStates = withAsyncStates;
 exports.mock = mock;
-exports.loadStates = loadStates;
-exports.exportStateValues = exportStateValues;
+exports.updateStates = updateStates;
+exports.exportStates = exportStates;
 exports.persist = persist;
 exports.compose = compose;
 exports.hoc = hoc;
@@ -219,7 +219,9 @@ function createState() {
 
       if (typeof callback !== "function") {
         newValue = // is synthetic event object
-        callback && callback.target ? callback.target.value : callback;
+        callback && callback.target ? typeof callback.target.checked !== "undefined" ? callback.target.checked // checkbox
+        : callback.target.value // other inputs
+        : callback;
       } else {
         newValue = callback(simpleState.value);
       }
@@ -647,36 +649,36 @@ function mock(actionMockings, functor) {
   }
 }
 /**
- * load multiple states from specific data
- * @param states
+ * update multiple states from specific data
+ * @param stateMap
  * @param data
  */
 
 
-function loadStates(states) {
+function updateStates(stateMap) {
   var data = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-  Object.keys(states).forEach(function (key) {
+  Object.keys(stateMap).forEach(function (key) {
     // do not overwrite state value if the key is not present in data
     if (!(key in data)) return;
-    var state = states[key];
+    var state = stateMap[key];
 
     if (state.computed) {
       throw new Error("Cannot update computed state");
     }
 
-    state.value = data[key];
+    state(data[key]);
   });
 }
 /**
  * export multiple states to json object
- * @param states
+ * @param stateMap
  */
 
 
-function exportStateValues(states) {
+function exportStates(stateMap) {
   var values = {};
-  Object.keys(states).forEach(function (key) {
-    values[key] = states[key].value;
+  Object.keys(stateMap).forEach(function (key) {
+    values[key] = stateMap[key].value;
   });
   return values;
 }
@@ -691,7 +693,7 @@ function exportStateValues(states) {
 
 function persist(states, data, onChange) {
   var debounce = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : defaultDebounce;
-  loadStates(states, data);
+  updateStates(states, data);
   var timerId;
 
   function debouncedHandleChange() {
@@ -705,7 +707,7 @@ function persist(states, data, onChange) {
 
   function handleChange() {
     clearTimeout(timerId);
-    var values = exportStateValues(states);
+    var values = exportStates(states);
     onChange && onChange(values);
   }
 
