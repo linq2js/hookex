@@ -2,6 +2,8 @@ import { useEffect, useState, createElement, memo, useRef } from "react";
 
 const defaultDebounce = 300;
 const scopeUpdates = [];
+const noop = () => {};
+const noChange = {};
 let scopes = 0;
 let setUniqueId = 1;
 
@@ -25,9 +27,11 @@ export function createState(...args) {
   }
 
   // create simple state
-  if (args.length === 1) {
+  if (args.length < 2) {
     const simpleState = Object.assign(
-      callback => {
+      function(callback) {
+        if (!arguments.length) return simpleState.value;
+
         let newValue;
         // is normal object
         if (typeof callback !== "function") {
@@ -56,6 +60,13 @@ export function createState(...args) {
         subscribers,
         async: false,
         computed: false,
+        merge(value) {
+          simpleState({
+            ...simpleState.value,
+            value
+          });
+        },
+        init: noop,
         subscribe,
         unsubscribe
       }
@@ -72,9 +83,10 @@ export function createState(...args) {
 
   let keys = [];
   let timerId;
-  let allDone = dependencies.every(dependency => {
-    dependency.subscribe(sync ? callLoaderSync : debouncedCallLoader);
-    return dependency.done;
+  let allDone = dependencies.every(x => {
+    x.init();
+    x.subscribe(sync ? callLoaderSync : debouncedCallLoader);
+    return x.done;
   });
   const computedState = {
     dependencies,
@@ -82,13 +94,19 @@ export function createState(...args) {
     done: false,
     async: !sync,
     computed: true,
+    init: sync ? callLoaderSync : debouncedCallLoader,
     subscribers,
     subscribe,
     unsubscribe
   };
+
   let currentLock;
 
   function debouncedCallLoader() {
+    computedState.init = noop;
+
+    if (dependencies.some(x => !x.done)) return;
+
     if (debounce) {
       clearTimeout(timerId);
       currentLock = computedState.lock = {};
@@ -99,9 +117,7 @@ export function createState(...args) {
   }
 
   function shouldUpdate(callback) {
-    const newKeys = dependencies.map(dependency => {
-      return dependency.value;
-    });
+    const newKeys = getStateValues(dependencies, true);
 
     if (
       keys.length !== newKeys.length ||
@@ -113,6 +129,7 @@ export function createState(...args) {
   }
 
   function callLoaderSync() {
+    computedState.init = noop;
     shouldUpdate(() => {
       computedState.done = false;
       const prevValue = computedState.value;
@@ -128,21 +145,24 @@ export function createState(...args) {
     clearTimeout(timerId);
     if (currentLock !== computedState.lock) return;
     shouldUpdate(async () => {
-      const shouldNotity = computedState.done !== false || computedState.error;
+      const shouldNotify = computedState.done !== false || computedState.error;
 
       computedState.done = false;
       computedState.error = undefined;
 
       const originalValue = computedState.value;
 
-      if (shouldNotity) {
+      if (shouldNotify) {
         notify(subscribers);
       }
 
       try {
         const value = await loader(...keys);
         if (currentLock !== computedState.lock) return;
-        computedState.value = value;
+        if (value !== noChange) {
+          computedState.value = value;
+        }
+
         computedState.done = true;
       } catch (e) {
         if (currentLock !== computedState.lock) return;
@@ -158,9 +178,7 @@ export function createState(...args) {
   }
 
   if (allDone) {
-    if (computedState.async) {
-      callLoaderAsync();
-    } else {
+    if (!computedState.async) {
       callLoaderSync();
     }
   }
@@ -176,33 +194,6 @@ export function createState(...args) {
  */
 export function createAction(states, functor) {
   let accessors = createAccessors(states);
-
-  function createAccessors(states) {
-    return states.map(state => {
-      let originalValue = state.value;
-      return Object.assign(
-        function(value) {
-          if (arguments.length) {
-            if (state.computed) {
-              throw new Error("Cannot update computed state");
-            }
-            return (state.value = value);
-          }
-
-          return state.value;
-        },
-        {
-          state,
-          hasChange() {
-            return originalValue !== state.value;
-          },
-          resetOriginalValue() {
-            originalValue = state.value;
-          }
-        }
-      );
-    });
-  }
 
   function performUpdate(subscribers = {}, batchUpdate = false) {
     // collect all subscribers
@@ -257,8 +248,11 @@ export function createAction(states, functor) {
   );
 }
 
-function getStateValues(states) {
-  return states.map(state => (state.async ? state : state.value));
+function getStateValues(states, valueOnly) {
+  return states.map(state => {
+    state.init();
+    return valueOnly ? state.value : state.async ? state : state.value;
+  });
 }
 
 export function useStates(...states) {
@@ -569,4 +563,31 @@ function notify(subscribers) {
   for (const subscriber of Object.values(subscribers)) {
     subscriber();
   }
+}
+
+function createAccessors(states) {
+  return states.map(state => {
+    let originalValue = state.value;
+    return Object.assign(
+      function(value) {
+        if (arguments.length) {
+          if (state.computed) {
+            throw new Error("Cannot update computed state");
+          }
+          return (state.value = value);
+        }
+
+        return state.value;
+      },
+      {
+        state,
+        hasChange() {
+          return originalValue !== state.value;
+        },
+        resetOriginalValue() {
+          originalValue = state.value;
+        }
+      }
+    );
+  });
 }

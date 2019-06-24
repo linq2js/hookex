@@ -18,40 +18,6 @@ exports.AsyncRender = AsyncRender;
 
 var _react = require("react");
 
-function _objectSpread(target) {
-  for (var i = 1; i < arguments.length; i++) {
-    var source = arguments[i] != null ? arguments[i] : {};
-    var ownKeys = Object.keys(source);
-
-    if (typeof Object.getOwnPropertySymbols === 'function') {
-      ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) {
-        return Object.getOwnPropertyDescriptor(source, sym).enumerable;
-      }));
-    }
-
-    ownKeys.forEach(function (key) {
-      _defineProperty(target, key, source[key]);
-    });
-  }
-
-  return target;
-}
-
-function _defineProperty(obj, key, value) {
-  if (key in obj) {
-    Object.defineProperty(obj, key, {
-      value: value,
-      enumerable: true,
-      configurable: true,
-      writable: true
-    });
-  } else {
-    obj[key] = value;
-  }
-
-  return obj;
-}
-
 function _objectWithoutProperties(source, excluded) {
   if (source == null) return {};
 
@@ -184,8 +150,46 @@ function _arrayWithoutHoles(arr) {
   }
 }
 
+function _objectSpread(target) {
+  for (var i = 1; i < arguments.length; i++) {
+    var source = arguments[i] != null ? arguments[i] : {};
+    var ownKeys = Object.keys(source);
+
+    if (typeof Object.getOwnPropertySymbols === 'function') {
+      ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) {
+        return Object.getOwnPropertyDescriptor(source, sym).enumerable;
+      }));
+    }
+
+    ownKeys.forEach(function (key) {
+      _defineProperty(target, key, source[key]);
+    });
+  }
+
+  return target;
+}
+
+function _defineProperty(obj, key, value) {
+  if (key in obj) {
+    Object.defineProperty(obj, key, {
+      value: value,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+  } else {
+    obj[key] = value;
+  }
+
+  return obj;
+}
+
 var defaultDebounce = 300;
 var scopeUpdates = [];
+
+var noop = function noop() {};
+
+var noChange = {};
 var scopes = 0;
 var setUniqueId = 1;
 /**
@@ -196,6 +200,10 @@ var setUniqueId = 1;
  */
 
 function createState() {
+  for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+    args[_key] = arguments[_key];
+  }
+
   var subscribers = {};
 
   function unsubscribe(subscriber) {
@@ -209,12 +217,9 @@ function createState() {
   } // create simple state
 
 
-  for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
-    args[_key] = arguments[_key];
-  }
-
-  if (args.length === 1) {
+  if (args.length < 2) {
     var simpleState = Object.assign(function (callback) {
+      if (!arguments.length) return simpleState.value;
       var newValue; // is normal object
 
       if (typeof callback !== "function") {
@@ -240,6 +245,12 @@ function createState() {
       subscribers: subscribers,
       async: false,
       computed: false,
+      merge: function merge(value) {
+        simpleState(_objectSpread({}, simpleState.value, {
+          value: value
+        }));
+      },
+      init: noop,
       subscribe: subscribe,
       unsubscribe: unsubscribe
     });
@@ -258,9 +269,10 @@ function createState() {
       debounce = _args$$debounce === void 0 ? defaultDebounce : _args$$debounce;
   var keys = [];
   var timerId;
-  var allDone = dependencies.every(function (dependency) {
-    dependency.subscribe(sync ? callLoaderSync : debouncedCallLoader);
-    return dependency.done;
+  var allDone = dependencies.every(function (x) {
+    x.init();
+    x.subscribe(sync ? callLoaderSync : debouncedCallLoader);
+    return x.done;
   });
   var computedState = {
     dependencies: dependencies,
@@ -268,6 +280,7 @@ function createState() {
     done: false,
     async: !sync,
     computed: true,
+    init: sync ? callLoaderSync : debouncedCallLoader,
     subscribers: subscribers,
     subscribe: subscribe,
     unsubscribe: unsubscribe
@@ -275,6 +288,11 @@ function createState() {
   var currentLock;
 
   function debouncedCallLoader() {
+    computedState.init = noop;
+    if (dependencies.some(function (x) {
+      return !x.done;
+    })) return;
+
     if (debounce) {
       clearTimeout(timerId);
       currentLock = computedState.lock = {};
@@ -285,9 +303,7 @@ function createState() {
   }
 
   function shouldUpdate(callback) {
-    var newKeys = dependencies.map(function (dependency) {
-      return dependency.value;
-    });
+    var newKeys = getStateValues(dependencies, true);
 
     if (keys.length !== newKeys.length || keys.some(function (oldKey, index) {
       return oldKey !== newKeys[index];
@@ -298,6 +314,7 @@ function createState() {
   }
 
   function callLoaderSync() {
+    computedState.init = noop;
     shouldUpdate(function () {
       computedState.done = false;
       var prevValue = computedState.value;
@@ -318,17 +335,17 @@ function createState() {
     _asyncToGenerator(
     /*#__PURE__*/
     regeneratorRuntime.mark(function _callee() {
-      var shouldNotity, originalValue, value;
+      var shouldNotify, originalValue, value;
       return regeneratorRuntime.wrap(function _callee$(_context) {
         while (1) {
           switch (_context.prev = _context.next) {
             case 0:
-              shouldNotity = computedState.done !== false || computedState.error;
+              shouldNotify = computedState.done !== false || computedState.error;
               computedState.done = false;
               computedState.error = undefined;
               originalValue = computedState.value;
 
-              if (shouldNotity) {
+              if (shouldNotify) {
                 notify(subscribers);
               }
 
@@ -347,7 +364,10 @@ function createState() {
               return _context.abrupt("return");
 
             case 11:
-              computedState.value = value;
+              if (value !== noChange) {
+                computedState.value = value;
+              }
+
               computedState.done = true;
               _context.next = 21;
               break;
@@ -383,9 +403,7 @@ function createState() {
   }
 
   if (allDone) {
-    if (computedState.async) {
-      callLoaderAsync();
-    } else {
+    if (!computedState.async) {
       callLoaderSync();
     }
   }
@@ -402,31 +420,6 @@ function createState() {
 
 function createAction(states, functor) {
   var accessors = createAccessors(states);
-
-  function createAccessors(states) {
-    return states.map(function (state) {
-      var originalValue = state.value;
-      return Object.assign(function (value) {
-        if (arguments.length) {
-          if (state.computed) {
-            throw new Error("Cannot update computed state");
-          }
-
-          return state.value = value;
-        }
-
-        return state.value;
-      }, {
-        state: state,
-        hasChange: function hasChange() {
-          return originalValue !== state.value;
-        },
-        resetOriginalValue: function resetOriginalValue() {
-          originalValue = state.value;
-        }
-      });
-    });
-  }
 
   function performUpdate() {
     var subscribers = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
@@ -503,9 +496,10 @@ function createAction(states, functor) {
   });
 }
 
-function getStateValues(states) {
+function getStateValues(states, valueOnly) {
   return states.map(function (state) {
-    return state.async ? state : state.value;
+    state.init();
+    return valueOnly ? state.value : state.async ? state : state.value;
   });
 }
 
@@ -854,5 +848,30 @@ function notify(subscribers) {
     var subscriber = _Object$values[_i2];
     subscriber();
   }
+}
+
+function createAccessors(states) {
+  return states.map(function (state) {
+    var originalValue = state.value;
+    return Object.assign(function (value) {
+      if (arguments.length) {
+        if (state.computed) {
+          throw new Error("Cannot update computed state");
+        }
+
+        return state.value = value;
+      }
+
+      return state.value;
+    }, {
+      state: state,
+      hasChange: function hasChange() {
+        return originalValue !== state.value;
+      },
+      resetOriginalValue: function resetOriginalValue() {
+        originalValue = state.value;
+      }
+    });
+  });
 }
 //# sourceMappingURL=index.js.map
