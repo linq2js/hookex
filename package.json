@@ -1,6 +1,6 @@
 {
   "name": "hookex",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "description": "A simple state manager for React",
   "main": "src/index.js",
   "scripts": {

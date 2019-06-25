@@ -1,10 +1,87 @@
 import { useEffect, useState, createElement, memo, useRef } from "react";
 
-const defaultDebounce = 0;
 const scopeUpdates = [];
 const noop = () => {};
 const noChange = {};
-const configs = {};
+const accessorUtils = {
+  assign(...values) {
+    const originalValue = this.state.value;
+    return this(
+      Object.assign(
+        {},
+        originalValue,
+        ...values.map(value =>
+          typeof value === "function" ? value(originalValue) : value
+        )
+      )
+    );
+  },
+  assignProp(prop, ...values) {
+    const originalValue = this.state.value;
+    const newValue = Array.isArray(originalValue)
+      ? [...originalValue]
+      : { ...originalValue };
+    const propValue = newValue[prop];
+    newValue[prop] = Object.assign(
+      {},
+      propValue,
+      ...values.map(value =>
+        typeof value === "function" ? value(propValue) : value
+      )
+    );
+    return this(newValue);
+  },
+  push(...values) {
+    return this(this.state.value.concat(values));
+  },
+  unshift(...values) {
+    return this(values.concat(this.state.value));
+  },
+  filter(predicate) {
+    return this(this.state.value.filter(predicate));
+  },
+  exclude(...values) {
+    return this(this.state.value.filter(x => values.includes(x)));
+  },
+  unset(...props) {
+    const originalValue = this.state.value;
+    const newValue = Array.isArray(originalValue)
+      ? [...originalValue]
+      : { ...originalValue };
+    for (const prop of props) {
+      delete newValue[prop];
+    }
+    return this(newValue);
+  },
+  map(mapper) {
+    return this(this.state.value.map(mapper));
+  },
+  set(prop, value) {
+    const originalValue = this.state.value;
+    const newValue = Array.isArray(originalValue)
+      ? [...originalValue]
+      : { ...originalValue };
+    newValue[prop] =
+      typeof value === "function" ? value(newValue[prop]) : value;
+    return this(newValue);
+  },
+  sort(sorter) {
+    return this(this.state.value.slice().sort(sorter));
+  },
+  orderBy(selector, desc) {
+    return this.sort((a, b) => {
+      const aValue = selector(a),
+        bValue = selector(b);
+      return (
+        (aValue === bValue ? 0 : aValue > bValue ? 1 : -1) * (desc ? -1 : 1)
+      );
+    });
+  }
+};
+const configs = {
+  defaultDebounce: 0,
+  accessorUtils
+};
 let scopes = 0;
 let setUniqueId = 1;
 
@@ -91,7 +168,7 @@ export function createState(...args) {
   const [
     dependencies,
     loader,
-    { sync, defaultValue = undefined, debounce = defaultDebounce } = {}
+    { sync, defaultValue = undefined, debounce = configs.defaultDebounce } = {}
   ] = args;
 
   let currentLock;
@@ -264,9 +341,11 @@ export function createAction(states, functor) {
 }
 
 function getStateValues(states, valueOnly) {
-  return states.map(state => {
+  return states.map(x => {
+    const [state, mapper] = Array.isArray(x) ? x : [x];
     state.init();
-    return valueOnly ? state() : state.async ? state : state();
+    const result = valueOnly ? state() : state.async ? state : state();
+    return mapper ? mapper(result) : result;
   });
 }
 
@@ -274,7 +353,8 @@ export function useStates(...states) {
   const [, forceRerender] = useState();
   const unmountRef = useRef(false);
   const statesRef = useRef(states);
-  const values = getStateValues(states);
+  const valuesRef = useRef();
+  valuesRef.current = getStateValues(states);
 
   // get unmount status
   useEffect(
@@ -285,9 +365,23 @@ export function useStates(...states) {
   );
 
   useEffect(() => {
+    const hasMapper = statesRef.current.some(x => Array.isArray(x));
     // do not rerender if component is unmount
-    const handleChange = () => !unmountRef.current && forceRerender({});
-    const localStates = statesRef.current;
+    const handleChange = () => {
+      if (unmountRef.current) {
+        return;
+      }
+      const nextValues = getStateValues(statesRef.current);
+      if (
+        !hasMapper ||
+        valuesRef.current.some((x, index) => x !== nextValues[index])
+      ) {
+        forceRerender({});
+      }
+    };
+    const localStates = statesRef.current.map(x =>
+      Array.isArray(x) ? x[0] : x
+    );
 
     localStates.forEach(state => {
       state.subscribe(handleChange);
@@ -296,9 +390,9 @@ export function useStates(...states) {
     return () => {
       localStates.forEach(state => state.unsubscribe(handleChange));
     };
-  }, [forceRerender]);
+  }, []);
 
-  return values;
+  return valuesRef.current;
 }
 
 /**
@@ -437,7 +531,12 @@ export function exportStates(stateMap) {
  * @param onChange
  * @param debounce
  */
-export function persist(states, data, onChange, debounce = defaultDebounce) {
+export function persist(
+  states,
+  data,
+  onChange,
+  debounce = configs.defaultDebounce
+) {
   updateStates(states, data);
   let timerId;
   function debouncedHandleChange() {
@@ -590,16 +689,21 @@ function createAccessors(states) {
             throw new Error("Cannot update computed state");
           }
 
-          if (configs.transform) {
-            value = configs.transform(state.value, value);
+          if (configs.valueTrasnform) {
+            value = configs.valueTrasnform(state.value, value);
+          } else if (typeof value === "function") {
+            value = value(state.value);
           }
 
-          return (state.value = value);
+          state.value = value;
+
+          return this;
         }
 
         return state.value;
       },
       {
+        ...accessorUtils,
         state,
         hasChange() {
           return originalValue !== state.value;
@@ -613,5 +717,8 @@ function createAccessors(states) {
 }
 
 export function configure(options = {}) {
+  if (typeof options === "function") {
+    options = options(configs);
+  }
   Object.assign(configs, options);
 }
