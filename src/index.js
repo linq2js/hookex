@@ -4,6 +4,7 @@ const defaultDebounce = 0;
 const scopeUpdates = [];
 const noop = () => {};
 const noChange = {};
+const configs = {};
 let scopes = 0;
 let setUniqueId = 1;
 
@@ -588,6 +589,11 @@ function createAccessors(states) {
           if (state.computed) {
             throw new Error("Cannot update computed state");
           }
+
+          if (configs.transform) {
+            value = configs.transform(state.value, value);
+          }
+
           return (state.value = value);
         }
 
@@ -604,4 +610,8 @@ function createAccessors(states) {
       }
     );
   });
+}
+
+export function configure(options = {}) {
+  Object.assign(configs, options);
 }
