@@ -1,6 +1,6 @@
 import { useEffect, useState, createElement, memo, useRef } from "react";
 
-const defaultDebounce = 300;
+const defaultDebounce = 0;
 const scopeUpdates = [];
 const noop = () => {};
 const noChange = {};
@@ -26,52 +26,64 @@ export function createState(...args) {
     return this;
   }
 
+  let state;
+
+  function getValue(callback, currentValue) {
+    let newValue;
+    // is normal object
+    if (typeof callback !== "function") {
+      newValue =
+        // is synthetic event object
+        callback && callback.target
+          ? callback.target.type === "checkbox" ||
+            callback.target.type === "radio"
+            ? callback.target.checked // checkbox
+            : callback.target.value // other inputs
+          : callback;
+    } else {
+      newValue = callback(currentValue);
+    }
+
+    if (newValue && newValue.then) {
+      throw new Error("Do not use this method for async updating");
+    }
+
+    return newValue;
+  }
+
+  function accessor(callback) {
+    if (!arguments.length) return state.value;
+
+    if (state.computed) {
+      throw new Error("Cannot update computed state");
+    }
+
+    const newValue = getValue(callback, state.value);
+
+    if (newValue !== state.value) {
+      state.value = newValue;
+      notify(subscribers);
+    }
+  }
+
   // create simple state
   if (args.length < 2) {
-    const simpleState = Object.assign(
-      function(callback) {
-        if (!arguments.length) return simpleState.value;
-
-        let newValue;
-        // is normal object
-        if (typeof callback !== "function") {
-          newValue =
-            // is synthetic event object
-            callback && callback.target
-              ? typeof callback.target.checked !== "undefined"
-                ? callback.target.checked // checkbox
-                : callback.target.value // other inputs
-              : callback;
-        } else {
-          newValue = callback(simpleState.value);
-        }
-
-        if (newValue && newValue.then) {
-          throw new Error("Do not use this method for async updating");
-        }
-        if (newValue !== simpleState.value) {
-          simpleState.value = newValue;
-          notify(subscribers);
-        }
+    return (state = Object.assign(accessor, {
+      value: args[0],
+      done: true,
+      subscribers,
+      async: false,
+      computed: false,
+      merge(value) {
+        state({
+          ...state.value,
+          value
+        });
       },
-      {
-        value: args[0],
-        done: true,
-        subscribers,
-        async: false,
-        computed: false,
-        merge(value) {
-          simpleState({
-            ...simpleState.value,
-            value
-          });
-        },
-        init: noop,
-        subscribe,
-        unsubscribe
-      }
-    );
-    return simpleState;
+      init: noop,
+      subscribe,
+      unsubscribe
+    }));
   }
 
   // create computed state
@@ -81,6 +93,7 @@ export function createState(...args) {
     { sync, defaultValue = undefined, debounce = defaultDebounce } = {}
   ] = args;
 
+  let currentLock;
   let keys = [];
   let timerId;
   let allDone = dependencies.every(x => {
@@ -88,7 +101,7 @@ export function createState(...args) {
     x.subscribe(sync ? callLoaderSync : debouncedCallLoader);
     return x.done;
   });
-  const computedState = {
+  state = Object.assign(accessor, {
     dependencies,
     value: defaultValue,
     done: false,
@@ -98,18 +111,19 @@ export function createState(...args) {
     subscribers,
     subscribe,
     unsubscribe
-  };
+  });
 
-  let currentLock;
+  const asyncDependencies = dependencies.filter(x => x.async);
 
   function debouncedCallLoader() {
-    computedState.init = noop;
+    state.init = noop;
 
-    if (dependencies.some(x => !x.done)) return;
-
+    // make sure all async states should be done
+    if (asyncDependencies.some(x => !x.done)) return;
+    // this state is called from another async state so we skip debouncing
     if (debounce) {
       clearTimeout(timerId);
-      currentLock = computedState.lock = {};
+      currentLock = state.lock = {};
       timerId = setTimeout(callLoaderAsync, debounce);
     } else {
       callLoaderAsync();
@@ -129,13 +143,13 @@ export function createState(...args) {
   }
 
   function callLoaderSync() {
-    computedState.init = noop;
+    state.init = noop;
     shouldUpdate(() => {
-      computedState.done = false;
-      const prevValue = computedState.value;
-      computedState.value = loader(...keys);
-      computedState.done = true;
-      if (computedState.value !== prevValue) {
+      state.done = false;
+      const prevValue = state.value;
+      state.value = loader(...keys);
+      state.done = true;
+      if (state.value !== prevValue) {
         notify(subscribers);
       }
     });
@@ -143,14 +157,14 @@ export function createState(...args) {
 
   function callLoaderAsync() {
     clearTimeout(timerId);
-    if (currentLock !== computedState.lock) return;
+    if (currentLock !== state.lock) return;
     shouldUpdate(async () => {
-      const shouldNotify = computedState.done !== false || computedState.error;
+      const shouldNotify = state.done !== false || state.error;
 
-      computedState.done = false;
-      computedState.error = undefined;
+      state.done = false;
+      state.error = undefined;
 
-      const originalValue = computedState.value;
+      const originalValue = state.value;
 
       if (shouldNotify) {
         notify(subscribers);
@@ -158,32 +172,32 @@ export function createState(...args) {
 
       try {
         const value = await loader(...keys);
-        if (currentLock !== computedState.lock) return;
+        if (currentLock !== state.lock) return;
         if (value !== noChange) {
-          computedState.value = value;
+          state.value = value;
         }
 
-        computedState.done = true;
+        state.done = true;
       } catch (e) {
-        if (currentLock !== computedState.lock) return;
-        computedState.error = e;
-        computedState.done = true;
+        if (currentLock !== state.lock) return;
+        state.error = e;
+        state.done = true;
       }
 
       // dispatch change
-      if (computedState.value !== originalValue) {
-        notify(subscribers);
+      if (state.value !== originalValue) {
+        notify(subscribers, state);
       }
     });
   }
 
   if (allDone) {
-    if (!computedState.async) {
+    if (!state.async) {
       callLoaderSync();
     }
   }
 
-  return computedState;
+  return state;
 }
 
 /**
@@ -251,7 +265,7 @@ export function createAction(states, functor) {
 function getStateValues(states, valueOnly) {
   return states.map(state => {
     state.init();
-    return valueOnly ? state.value : state.async ? state : state.value;
+    return valueOnly ? state() : state.async ? state : state();
   });
 }
 
@@ -409,7 +423,7 @@ export function exportStates(stateMap) {
   const values = {};
 
   Object.keys(stateMap).forEach(key => {
-    values[key] = stateMap[key].value;
+    values[key] = stateMap[key]();
   });
 
   return values;
@@ -521,7 +535,7 @@ export function AsyncRender({
     return children;
   }
 
-  const data = state ? results[0].value : results.map(result => result.value);
+  const data = state ? results[0]() : getStateValues(results, true);
 
   if (render) {
     return createElement(
@@ -567,7 +581,7 @@ function notify(subscribers) {
 
 function createAccessors(states) {
   return states.map(state => {
-    let originalValue = state.value;
+    let originalValue = state();
     return Object.assign(
       function(value) {
         if (arguments.length) {

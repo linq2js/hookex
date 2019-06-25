@@ -1,7 +1,17 @@
 # hookex
 
 A state manager for React without reducer, Provider, dispatcher etc.
-Design for large projects which has thousand of components
+Design for large projects which has thousand of components.
+
+1. No Provider needed
+1. No Store needed
+1. No Reducer needed
+1. No Action Creator needed
+1. No Dispatcher needed
+1. Simple concept: State & Action
+1. Support Simple State (Synchronous State)
+1. Support Asynchronous State (with debouncing)
+1. Support Dynamic State
 
 # Samples
 
