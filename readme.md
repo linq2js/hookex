@@ -1,7 +1,6 @@
 # hookex
 
-A state manager for React without reducer, Provider, dispatcher etc.
-Design for large projects which has thousand of components.
+A state manager for React without reducer, Provider, dispatcher etc. Design for large projects.
 
 1. No Provider needed
 1. No Store needed
@@ -12,6 +11,9 @@ Design for large projects which has thousand of components.
 1. Support Simple State (Synchronous State)
 1. Support Asynchronous State (with debouncing)
 1. Support Dynamic State
+1. Support Sub State
+1. Built-in methods for updating state on the fly
+1. Compatible with other state mangers (MobX, Redux...)
 
 # Samples
 
@@ -225,3 +227,19 @@ function App() {
 
 render(<App />, document.getElementById("root"));
 ```
+
+# API References
+
+1. createState(defaultValue)
+1. createState(dependencies, functor, options)
+1. createAction(dependencies, functor)
+1. useStates(...states)
+1. withAsyncStates(states, fallbackOrOptions)
+1. updateStates(stateMap, data)
+1. AsyncRender
+1. persistStates(stateMap, initialData, onChange)
+1. compose(...funcs)
+1. hoc(functor)
+1. memoize(func)
+1. configure(optionsOrCallback)
+

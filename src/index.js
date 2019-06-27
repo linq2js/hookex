@@ -1,9 +1,55 @@
 import { useEffect, useState, createElement, memo, useRef } from "react";
-
+const useEffectWithDynamicArray = useEffect;
 const scopeUpdates = [];
 const noop = () => {};
 const noChange = {};
-const accessorUtils = {
+const modifyDate = (
+  date,
+  year = 0,
+  month = 0,
+  day = 0,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  milli = 0
+) =>
+  new Date(
+    date.getFullYear() + year,
+    date.getMonth() + month,
+    date.getDate() + day,
+    date.getHours() + hour,
+    date.getMinutes() + minute,
+    date.getSeconds() + second,
+    date.getMilliseconds() + milli
+  );
+const cloneObject = obj => (Array.isArray(obj) ? [...obj] : { ...obj });
+const dateModifiers = {
+  month(date, value) {
+    return modifyDate(date, 0, value);
+  },
+  year(date, value) {
+    return modifyDate(date, value);
+  },
+  day(date, value) {
+    return modifyDate(date, 0, 0, value);
+  },
+  week(date, value) {
+    return modifyDate(date, 0, 0, value * 7);
+  },
+  hour(date, value) {
+    return modifyDate(date, 0, 0, 0, value);
+  },
+  minute(date, value) {
+    return modifyDate(date, 0, 0, 0, 0, value);
+  },
+  second(date, value) {
+    return modifyDate(date, 0, 0, 0, 0, 0, value);
+  },
+  milli(date, value) {
+    return modifyDate(date, 0, 0, 0, 0, 0, 0, value);
+  }
+};
+const helpers = {
   assign(...values) {
     const originalValue = this.state.value;
     return this(
@@ -16,11 +62,11 @@ const accessorUtils = {
       )
     );
   },
+  splice(index, count = 1, ...items) {
+    return this(this.state.value.slice().splice(index, count, ...items));
+  },
   assignProp(prop, ...values) {
-    const originalValue = this.state.value;
-    const newValue = Array.isArray(originalValue)
-      ? [...originalValue]
-      : { ...originalValue };
+    const newValue = cloneObject(this.state.value);
     const propValue = newValue[prop];
     newValue[prop] = Object.assign(
       {},
@@ -44,10 +90,7 @@ const accessorUtils = {
     return this(this.state.value.filter(x => values.includes(x)));
   },
   unset(...props) {
-    const originalValue = this.state.value;
-    const newValue = Array.isArray(originalValue)
-      ? [...originalValue]
-      : { ...originalValue };
+    const newValue = cloneObject(this.state.value);
     for (const prop of props) {
       delete newValue[prop];
     }
@@ -57,10 +100,7 @@ const accessorUtils = {
     return this(this.state.value.map(mapper));
   },
   set(prop, value) {
-    const originalValue = this.state.value;
-    const newValue = Array.isArray(originalValue)
-      ? [...originalValue]
-      : { ...originalValue };
+    const newValue = cloneObject(this.state.value);
     newValue[prop] =
       typeof value === "function" ? value(newValue[prop]) : value;
     return this(newValue);
@@ -76,11 +116,38 @@ const accessorUtils = {
         (aValue === bValue ? 0 : aValue > bValue ? 1 : -1) * (desc ? -1 : 1)
       );
     });
+  },
+  toggle(prop) {
+    if (!arguments.length) {
+      return this(!this.state.value);
+    }
+    const newValue = cloneObject(this.state.value);
+    newValue[prop] = !newValue[prop];
+    return this(newValue);
+  },
+  div(value) {
+    return this(this.state.value / value);
+  },
+  mul(value) {
+    return this(this.state.value * value);
+  },
+  add(value, duration = "day") {
+    const originalValue = this.state.value;
+    if (originalValue instanceof Date) {
+      if (duration in dateModifiers) {
+        return this(dateModifiers[duration](originalValue, value));
+      }
+      throw new Error("Invalid date duration " + duration);
+    }
+    return this(this.state.value + value);
+  },
+  replace(searchValue, replaceWith) {
+    return this(this.state.value.replace(searchValue, replaceWith));
   }
 };
 const configs = {
-  defaultDebounce: 0,
-  accessorUtils
+  defaultDebounce: 50,
+  accessorUtils: helpers
 };
 let scopes = 0;
 let setUniqueId = 1;
@@ -146,6 +213,7 @@ export function createState(...args) {
 
   // create simple state
   if (args.length < 2) {
+    const subStates = {};
     return (state = Object.assign(accessor, {
       value: args[0],
       done: true,
@@ -160,7 +228,26 @@ export function createState(...args) {
       },
       init: noop,
       subscribe,
-      unsubscribe
+      unsubscribe,
+      // get sub state by name
+      get(subStateName, defaultValue) {
+        state.multiple = true;
+        let subState = subStates[subStateName];
+
+        if (!subState) {
+          subStates[subStateName] = subState = createState(defaultValue);
+          subState.parent = state;
+        }
+        return subState;
+      },
+      // delete sub state by name
+      delete(subStateName) {
+        delete subStates[subStateName];
+        return this;
+      },
+      invoke(actionBody, ...args) {
+        return createAction([state], actionBody)(...args);
+      }
     }));
   }
 
@@ -211,10 +298,7 @@ export function createState(...args) {
   function shouldUpdate(callback) {
     const newKeys = getStateValues(dependencies, true);
 
-    if (
-      keys.length !== newKeys.length ||
-      keys.some((oldKey, index) => oldKey !== newKeys[index])
-    ) {
+    if (arrayDiff(keys, newKeys)) {
       keys = newKeys;
       callback();
     }
@@ -285,14 +369,24 @@ export function createState(...args) {
  * @return {(Function & {getStates(): *, setStates(*): void})|*}
  */
 export function createAction(states, functor) {
-  let accessors = createAccessors(states);
+  let accessors = states.map(createAccessor);
 
   function performUpdate(subscribers = {}, batchUpdate = false) {
-    // collect all subscribers
-    for (const accessor of accessors) {
-      if (accessor.hasChange()) {
+    const accessorBag = accessors.slice();
+    while (accessorBag.length) {
+      const accessor = accessorBag.shift();
+      if (accessor.subStates) {
+        accessorBag.push(...Object.values(accessor.subStates));
+      }
+      if (accessor.changed) {
         Object.assign(subscribers, accessor.state.subscribers);
-        accessor.resetOriginalValue();
+        let parent = accessor.state.parent;
+        // notify to all ancestors
+        while (parent) {
+          Object.assign(subscribers, parent.subscribers);
+          parent = parent.parent;
+        }
+        accessor.changed = false;
       }
     }
 
@@ -334,27 +428,24 @@ export function createAction(states, functor) {
         return states;
       },
       setStates(newStates) {
-        accessors = createAccessors((states = newStates));
+        accessors = (states = newStates).map(createAccessor);
       }
     }
   );
 }
 
-function getStateValues(states, valueOnly) {
-  return states.map(x => {
-    const [state, mapper] = Array.isArray(x) ? x : [x];
-    state.init();
-    const result = valueOnly ? state() : state.async ? state : state();
-    return mapper ? mapper(result) : result;
-  });
-}
-
 export function useStates(...states) {
   const [, forceRerender] = useState();
   const unmountRef = useRef(false);
-  const statesRef = useRef(states);
   const valuesRef = useRef();
-  valuesRef.current = getStateValues(states);
+  const statesRef = useRef();
+  const hasMapperRef = useRef();
+  const statesForCache = states.map(x => (Array.isArray(x) ? x[0] : x));
+  if (!valuesRef.current) {
+    valuesRef.current = getStateValues(states);
+  }
+  statesRef.current = states;
+  hasMapperRef.current = states.some(x => Array.isArray(x));
 
   // get unmount status
   useEffect(
@@ -364,33 +455,35 @@ export function useStates(...states) {
     []
   );
 
-  useEffect(() => {
-    const hasMapper = statesRef.current.some(x => Array.isArray(x));
-    // do not rerender if component is unmount
-    const handleChange = () => {
-      if (unmountRef.current) {
-        return;
-      }
-      const nextValues = getStateValues(statesRef.current);
-      if (
-        !hasMapper ||
-        valuesRef.current.some((x, index) => x !== nextValues[index])
-      ) {
-        forceRerender({});
-      }
-    };
-    const localStates = statesRef.current.map(x =>
-      Array.isArray(x) ? x[0] : x
-    );
+  useEffectWithDynamicArray(
+    () => {
+      const checkForUpdates = () => {
+        // do not rerender if component is unmount
+        if (unmountRef.current) {
+          return;
+        }
+        const nextValues = getStateValues(statesRef.current);
+        if (!hasMapperRef.current || arrayDiff(valuesRef.current, nextValues)) {
+          valuesRef.current = nextValues;
+          forceRerender({});
+        }
+      };
 
-    localStates.forEach(state => {
-      state.subscribe(handleChange);
-    });
+      statesForCache.forEach(state => {
+        state.subscribe(checkForUpdates);
+        state.init();
+      });
 
-    return () => {
-      localStates.forEach(state => state.unsubscribe(handleChange));
-    };
-  }, []);
+      // some async action may be done at this time
+      checkForUpdates();
+
+      return () => {
+        statesForCache.forEach(state => state.unsubscribe(checkForUpdates));
+      };
+    },
+    // just run this effect once state list changed, has no effect if mapper changed
+    statesForCache
+  );
 
   return valuesRef.current;
 }
@@ -531,7 +624,7 @@ export function exportStates(stateMap) {
  * @param onChange
  * @param debounce
  */
-export function persist(
+export function persistStates(
   states,
   data,
   onChange,
@@ -600,7 +693,7 @@ export function memoize(f) {
 
   return function(...args) {
     // call f on first time or args changed
-    if (!lastArgs || lastArgs.some((value, index) => value !== args[index])) {
+    if (!lastArgs || arrayDiff(lastArgs, args)) {
       lastArgs = args;
       lastResult = f(...lastArgs);
     }
@@ -655,6 +748,17 @@ export function AsyncRender({
   return data;
 }
 
+export function configure(options = {}) {
+  if (typeof options === "function") {
+    options = options(configs);
+  }
+  Object.assign(configs, options);
+}
+
+function arrayDiff(a, b) {
+  return a.length !== b.length || a.some((i, index) => i !== b[index]);
+}
+
 function addToSet(set, functor) {
   if (!functor.__id__) {
     functor.__id__ = setUniqueId++;
@@ -679,46 +783,59 @@ function notify(subscribers) {
   }
 }
 
-function createAccessors(states) {
-  return states.map(state => {
-    let originalValue = state();
-    return Object.assign(
-      function(value) {
-        if (arguments.length) {
-          if (state.computed) {
-            throw new Error("Cannot update computed state");
-          }
-
-          if (configs.valueTrasnform) {
-            value = configs.valueTrasnform(state.value, value);
-          } else if (typeof value === "function") {
-            value = value(state.value);
-          }
-
-          state.value = value;
-
-          return this;
-        }
-
-        return state.value;
-      },
-      {
-        ...accessorUtils,
-        state,
-        hasChange() {
-          return originalValue !== state.value;
-        },
-        resetOriginalValue() {
-          originalValue = state.value;
-        }
+function createAccessor(state) {
+  const accessor = function(value, ...args) {
+    if (arguments.length) {
+      if (state.computed) {
+        throw new Error("Cannot update computed state");
       }
-    );
+
+      if (configs.transform) {
+        value = configs.transform(state.value, value, ...args);
+      } else if (typeof value === "function") {
+        value = value(state.value);
+      }
+
+      if (state.value !== value) {
+        state.value = value;
+        accessor.changed = true;
+      }
+
+      return accessor;
+    }
+
+    return state.value;
+  };
+  return Object.assign(accessor, {
+    ...helpers,
+    state,
+    changed: false,
+    get(subStateName) {
+      if (!this.subStates) {
+        this.subStates = {};
+      }
+      return (
+        this.subStates[subStateName] ||
+        (this.subStates[subStateName] = createAccessor(
+          this.state.get(subStateName)
+        ))
+      );
+    }
   });
 }
 
-export function configure(options = {}) {
-  if (typeof options === "function") {
-    options = options(configs);
-  }
-  Object.assign(configs, options);
+function getStateValues(states, valueOnly) {
+  return states.map(x => {
+    const [state, mapper, ...mapperArgs] = Array.isArray(x) ? x : [x];
+    state.init();
+    const result = valueOnly ? state() : state.async ? state : state();
+    if (mapper && !mapper.__memoizedMapper) {
+      mapper.__memoizedMapper = memoize(mapper);
+    }
+    return mapper
+      ? mapperArgs.length
+        ? mapper.__memoizedMapper(result, ...mapperArgs)
+        : mapper(result)
+      : result;
+  });
 }
